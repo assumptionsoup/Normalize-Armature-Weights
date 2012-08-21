@@ -147,33 +147,32 @@ def normalize_armature( cls, context ):
 			# errors.  If anyone knows a stable way to get around this, please
 			# let me know.  Rounding might work, but I'd rather not round away
 			# real errors either.
-			if active_group == -1 and sum_other:
-				# Vertex not in active group.  Normalize proportionally.
+
+			assert active_group != -1, "Vertex %d missing active group" % vert.index
+			assert weights, "Vertex %d has no weights assigned" % vert.index
+			
+			if weights[indexes.index(active_group)] >= 1.0:
+				# Active group is at or above 1.  Make other weights zero.
 				for x, weight in enumerate(weights):
-					groups[indexes[x]].weight = weight / sum_other
+					groups[indexes[x]].weight = 0.0
+				groups[active_group].weight = 1.0
 			else:
-				if weights[indexes.index(active_group)] >= 1.0:
-					# Active group is at or above 1.  Make other weights zero.
+				bias = 1.0 - groups[active_group].weight
+				if sum_other:
+					# Other groups have some weights.  Distribute remaining proportionally among them.
+					# This also may have issues from rounding errors (choosing to dump nearly
+					# .999 onto a vert because it was at 0.001 and the other was at 0.0001)
 					for x, weight in enumerate(weights):
-						groups[indexes[x]].weight = 0.0
-					groups[active_group].weight = 1.0
-				else:
-					bias = 1.0 - groups[active_group].weight
-					if sum_other:
-						# Other groups have some weights.  Distribute remaining proportionally among them.
-						# This also may have issues from rounding errors (choosing to dump nearly
-						# .999 onto a vert because it was at 0.001 and the other was at 0.0001)
-						for x, weight in enumerate(weights):
-							if indexes[x] != active_group:
-								groups[indexes[x]].weight = bias * ( weight / sum_other )
-					elif sum and len(weights) > 1:
-						# Active group has weight, which is not 1, and other groups have no weight.  
-						# Distribute the remaining proportionally.
-						weight = bias * (1 / len(weights))
-						for x in range(len(weights)):
-							if indexes[x] != active_group:
-								groups[indexes[x]].weight = weight
-		
+						if indexes[x] != active_group:
+							groups[indexes[x]].weight = bias * ( weight / sum_other )
+				elif weights:
+					weight = bias * (1 / len(weights))
+					# Active group has a weight less than 1, and other groups have no weight.  
+					# Distribute the remaining weights equally.
+					for x in range(len(weights)):
+						if indexes[x] != active_group:
+							groups[indexes[x]].weight = weight
+	
 	obj.data.update()
 	return {'FINISHED'}
 
