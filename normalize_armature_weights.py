@@ -87,36 +87,38 @@ def assign_all_groups(context, group_indexes):
 	mesh.free()
 	obj.data.update()
 	
-def normalize_armature( cls, context ):
+def normalize_armature( cls, context, bone_indexes = None, hold_active = True):
 	# Currently assume only one armature.  I don't really want
 	# to deal with multiple ones right now.
 	obj = context.object
 	mesh = obj.data
 	
-	# Find armature group.
-	bones = []
-	armatures = 0
-	for mod in obj.modifiers:
-		if mod.type == 'ARMATURE' and mod.use_vertex_groups and mod.object:
-				bones = [bone.name for bone in mod.object.data.bones]
-				armatures += 1
-				if armatures == 2:
-					break
-	
-	# Error checking.
-	if not bones:
-		cls.report({'ERROR'}, "No armature found on object.")
-		return {'CANCELLED'}
-	
-	if obj.vertex_groups.active.name not in bones:
-		cls.report({'ERROR'}, "Current vertex group not found on armature.")
-		return {'CANCELLED'}
+	if bone_indexes is None:
+		# Find armature group.
+		bones = []
+		armatures = 0
+		for mod in obj.modifiers:
+			if mod.type == 'ARMATURE' and mod.use_vertex_groups and mod.object:
+					bones = [bone.name for bone in mod.object.data.bones]
+					armatures += 1
+					if armatures == 2:
+						break
+		
+		# Error checking.
+		if not bones:
+			cls.report({'ERROR'}, "No armature found on object.")
+			return {'CANCELLED'}
+		
+		if obj.vertex_groups.active.name not in bones:
+			cls.report({'ERROR'}, "Current vertex group not found on armature.")
+			return {'CANCELLED'}
 
-	if armatures > 1:
-		cls.report({'WARNING'}, "Multiple armatures found on object.  Operator may have unexpected results.")
+		if armatures > 1:
+			cls.report({'WARNING'}, "Multiple armatures found on object.  Operator may have unexpected results.")
+		
+		# Get bone indexes
+		bone_indexes = [group.index for group in obj.vertex_groups if group.name in bones]
 	
-	# Get bone indexes
-	bone_indexes = [group.index for group in obj.vertex_groups if group.name in bones]
 	assign_all_groups(context, bone_indexes)
 	bone_indexes = set(bone_indexes)
 	
@@ -136,7 +138,7 @@ def normalize_armature( cls, context ):
 				weights.append( group.weight )
 				indexes.append( x )
 				sum += group.weight
-				if group.group != active_index:
+				if group.group != active_index or not hold_active:
 					sum_other += group.weight
 				else:
 					active_group = x
@@ -148,31 +150,34 @@ def normalize_armature( cls, context ):
 			# let me know.  Rounding might work, but I'd rather not round away
 			# real errors either.
 
-			assert active_group != -1, "Vertex %d missing active group" % vert.index
+			assert active_group != -1 or not hold_active, "Vertex %d missing active group" % vert.index
 			assert weights, "Vertex %d has no weights assigned" % vert.index
 			
-			if weights[indexes.index(active_group)] >= 1.0:
-				# Active group is at or above 1.  Make other weights zero.
-				for x, weight in enumerate(weights):
-					groups[indexes[x]].weight = 0.0
-				groups[active_group].weight = 1.0
+			if hold_active and weights[indexes.index(active_group)] >= 1.0:
+					# Active group is at or above 1.  Make other weights zero.
+					for x, weight in enumerate(weights):
+						groups[indexes[x]].weight = 0.0
+					groups[active_group].weight = 1.0
 			else:
-				bias = 1.0 - groups[active_group].weight
+				if not hold_active:
+					bias = 1.0
+				else:
+					bias = 1.0 - groups[active_group].weight
 				if sum_other:
 					# Other groups have some weights.  Distribute remaining proportionally among them.
 					# This also may have issues from rounding errors (choosing to dump nearly
 					# .999 onto a vert because it was at 0.001 and the other was at 0.0001)
 					for x, weight in enumerate(weights):
-						if indexes[x] != active_group:
+						if indexes[x] != active_group or not hold_active:
 							groups[indexes[x]].weight = bias * ( weight / sum_other )
 				elif weights:
 					weight = bias * (1 / len(weights))
 					# Active group has a weight less than 1, and other groups have no weight.  
 					# Distribute the remaining weights equally.
 					for x in range(len(weights)):
-						if indexes[x] != active_group:
+						if indexes[x] != active_group or not hold_active:
 							groups[indexes[x]].weight = weight
-	
+
 	obj.data.update()
 	return {'FINISHED'}
 
